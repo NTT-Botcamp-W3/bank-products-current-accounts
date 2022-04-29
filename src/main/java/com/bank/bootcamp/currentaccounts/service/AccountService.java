@@ -19,6 +19,7 @@ import com.bank.bootcamp.currentaccounts.entity.TransactionSequences;
 import com.bank.bootcamp.currentaccounts.exception.BankValidationException;
 import com.bank.bootcamp.currentaccounts.repository.AccountRepository;
 import com.bank.bootcamp.currentaccounts.repository.TransactionRepository;
+import com.bank.bootcamp.currentaccounts.webclient.CreditWebClient;
 import lombok.RequiredArgsConstructor;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -31,6 +32,7 @@ public class AccountService {
   private final TransactionRepository transactionRepository;
   private final NextSequenceService nextSequenceService;
   private final Environment env;
+  private final CreditWebClient creditWebClient;
   
   private ModelMapper mapper = new ModelMapper();
 
@@ -54,23 +56,32 @@ public class AccountService {
             })
         )
         .flatMap(acc -> {
-          return accountRepository.save(dto.toAccount())
-              .flatMap(savedAccount -> {
-                return nextSequenceService.getNextSequence(TransactionSequences.class.getSimpleName())
-                    .map(nextSeq -> {
-                      var openingTransaction = new Transaction();
-                      openingTransaction.setAccountId(savedAccount.getId());
-                      openingTransaction.setAgent("-");
-                      openingTransaction.setAmount(dto.getOpeningAmount());
-                      openingTransaction.setDescription("Opening account");
-                      openingTransaction.setOperationNumber(nextSeq);
-                      openingTransaction.setRegisterDate(LocalDateTime.now());
-                      return openingTransaction;
-                    })
-                    .flatMap(tx -> {
-                      return transactionRepository.save(tx).map(tt -> savedAccount);
-                    });
-          });
+          return Mono.just(dto)
+              .flatMap(x -> !ObjectUtils.isEmpty(dto.getProfile()) && "PYME".equalsIgnoreCase(dto.getProfile()) ? Mono.just(dto) : Mono.empty())
+              // Si hay dato en el flujo, quiere decir que si es PYME
+              .flatMap(register -> creditWebClient.getAllBalances(dto.getCustomerId())
+                  .switchIfEmpty(Mono.error(new BankValidationException("Customer has not credit product for PYME account")))
+                  .count()
+                  .map(count -> register))
+              // Si llega a caer aquí quiere decir que no es PYME y no hay errores
+              .switchIfEmpty(Mono.just(dto))
+              .flatMap(register -> {
+                return accountRepository.save(register.toAccount()).flatMap(savedAccount -> {
+                  return nextSequenceService.getNextSequence(TransactionSequences.class.getSimpleName())
+                      .map(nextSeq -> {
+                        var openingTransaction = new Transaction();
+                        openingTransaction.setAccountId(savedAccount.getId());
+                        openingTransaction.setAgent("-");
+                        openingTransaction.setAmount(dto.getOpeningAmount());
+                        openingTransaction.setDescription("Opening account");
+                        openingTransaction.setOperationNumber(nextSeq);
+                        openingTransaction.setRegisterDate(LocalDateTime.now());
+                        return openingTransaction;
+                      }).flatMap(tx -> {
+                        return transactionRepository.save(tx).map(tt -> savedAccount);
+                      });
+                });
+              });
         });
   }
   

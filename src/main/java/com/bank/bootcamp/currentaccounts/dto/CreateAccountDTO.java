@@ -11,6 +11,7 @@ public class CreateAccountDTO {
   private Double maintenanceFee;
   private CustomerType customerType;
   private Double openingAmount;
+  private String profile;
   
   public Account toAccount() {
     var account = new Account();

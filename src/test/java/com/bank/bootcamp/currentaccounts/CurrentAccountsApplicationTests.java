@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.modelmapper.ModelMapper;
 import org.springframework.core.env.Environment;
+import com.bank.bootcamp.currentaccounts.dto.BalanceDTO;
 import com.bank.bootcamp.currentaccounts.dto.CreateAccountDTO;
 import com.bank.bootcamp.currentaccounts.dto.CreateTransactionDTO;
 import com.bank.bootcamp.currentaccounts.entity.Account;
@@ -21,6 +22,7 @@ import com.bank.bootcamp.currentaccounts.repository.AccountRepository;
 import com.bank.bootcamp.currentaccounts.repository.TransactionRepository;
 import com.bank.bootcamp.currentaccounts.service.AccountService;
 import com.bank.bootcamp.currentaccounts.service.NextSequenceService;
+import com.bank.bootcamp.currentaccounts.webclient.CreditWebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
@@ -33,6 +35,7 @@ public class CurrentAccountsApplicationTests {
   private static NextSequenceService nextSequenceService;
   private static Environment env;
   private ModelMapper mapper = new ModelMapper();
+  private static CreditWebClient creditWebClient;
   
   @BeforeAll
   public static void setup() {
@@ -40,7 +43,8 @@ public class CurrentAccountsApplicationTests {
     transactionRepository = mock(TransactionRepository.class);
     nextSequenceService = mock(NextSequenceService.class);
     env = mock(Environment.class);
-    accountService = new AccountService(accountRepository, transactionRepository, nextSequenceService, env);
+    creditWebClient = mock(CreditWebClient.class);
+    accountService = new AccountService(accountRepository, transactionRepository, nextSequenceService, env, creditWebClient);
   }
   
   private Account getPersonalAccount() {
@@ -124,6 +128,49 @@ public class CurrentAccountsApplicationTests {
     StepVerifier.create(mono2).assertNext(acc -> {
       assertThat(acc.getId()).isNotNull();
     }).verifyComplete();
+    
+  }
+  
+  
+  @Test
+  public void createBusinessAccountWithPYMEProfile() throws Exception {
+    
+    var businessAccount = getBusinessAccount();
+    var businessAccountDTO = mapper.map(businessAccount, CreateAccountDTO.class);
+    businessAccountDTO.setOpeningAmount(100d);
+    businessAccountDTO.setProfile("PYME");
+    
+    var savedBusinessAccount = mapper.map(businessAccount, Account.class);
+    savedBusinessAccount.setId(UUID.randomUUID().toString());
+    
+    when(accountRepository.findByCustomerIdAndCustomerType(businessAccount.getCustomerId(), businessAccount.getCustomerType())).thenReturn(Flux.empty());
+    when(accountRepository.save(Mockito.any(Account.class))).thenReturn(Mono.just(savedBusinessAccount));
+    when(creditWebClient.getAllBalances(businessAccount.getCustomerId())).thenReturn(Flux.just(new BalanceDTO()));
+    
+    var mono = accountService.createAccount(businessAccountDTO);
+    StepVerifier.create(mono).assertNext(acc -> {
+      assertThat(acc.getId()).isNotNull();
+    }).verifyComplete();
+    
+  }
+  
+  @Test
+  public void createBusinessAccountWithPYMEProfileFail() throws Exception {
+    
+    var businessAccount = getBusinessAccount();
+    var businessAccountDTO = mapper.map(businessAccount, CreateAccountDTO.class);
+    businessAccountDTO.setOpeningAmount(100d);
+    businessAccountDTO.setProfile("PYME");
+    
+    var savedBusinessAccount = mapper.map(businessAccount, Account.class);
+    savedBusinessAccount.setId(UUID.randomUUID().toString());
+    
+    when(accountRepository.findByCustomerIdAndCustomerType(businessAccount.getCustomerId(), businessAccount.getCustomerType())).thenReturn(Flux.empty());
+    when(accountRepository.save(Mockito.any(Account.class))).thenReturn(Mono.just(savedBusinessAccount));
+    when(creditWebClient.getAllBalances(businessAccount.getCustomerId())).thenReturn(Flux.empty());
+    
+    var mono = accountService.createAccount(businessAccountDTO);
+    StepVerifier.create(mono).expectError(BankValidationException.class).verify();
     
   }
   
