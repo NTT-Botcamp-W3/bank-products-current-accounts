@@ -5,11 +5,12 @@ import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.util.Optional;
 import java.util.function.Predicate;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.modelmapper.ModelMapper;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
 import org.springframework.util.ObjectUtils;
 import com.bank.bootcamp.currentaccounts.dto.BalanceDTO;
+import com.bank.bootcamp.currentaccounts.dto.CreateAccountDTO;
 import com.bank.bootcamp.currentaccounts.dto.CreateTransactionDTO;
 import com.bank.bootcamp.currentaccounts.entity.Account;
 import com.bank.bootcamp.currentaccounts.entity.CustomerType;
@@ -18,7 +19,6 @@ import com.bank.bootcamp.currentaccounts.entity.TransactionSequences;
 import com.bank.bootcamp.currentaccounts.exception.BankValidationException;
 import com.bank.bootcamp.currentaccounts.repository.AccountRepository;
 import com.bank.bootcamp.currentaccounts.repository.TransactionRepository;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -27,24 +27,26 @@ import reactor.core.publisher.Mono;
 @RequiredArgsConstructor
 public class AccountService {
   
-  private static final Logger logger = LoggerFactory.getLogger(AccountService.class);
-  
   private final AccountRepository accountRepository;
   private final TransactionRepository transactionRepository;
   private final NextSequenceService nextSequenceService;
+  private final Environment env;
   
-  private ObjectMapper objectMapper = new ObjectMapper();
+  private ModelMapper mapper = new ModelMapper();
 
-  public Mono<Account> createAccount(Account account) {
-    return Mono.just(account)
-        .then(check(account, acc -> Optional.of(acc).isEmpty(), "Account has not data"))
-        .then(check(account, acc -> ObjectUtils.isEmpty(acc.getCustomerType()), "Customer Type is required"))
-        .then(check(account, acc -> ObjectUtils.isEmpty(acc.getCustomerId()), "Customer ID is required"))
-        .then(check(account, acc -> ObjectUtils.isEmpty(acc.getMaintenanceFee()), "Maintenance fee is required"))
-        .then(check(account, acc -> acc.getMaintenanceFee() <= 0, "Maintenance fee must be greater than or equal to zero"))
-        .then(accountRepository.findByCustomerIdAndCustomerType(account.getCustomerId(), account.getCustomerType()).count()
+  public Mono<Account> createAccount(CreateAccountDTO dto) {
+    var minimumOpeningAmount = Double.parseDouble(Optional.ofNullable(env.getProperty("account.minimum-opening-amount")).orElse("0"));
+    return Mono.just(dto)
+        .then(check(dto, acc -> Optional.of(acc).isEmpty(), "Account has not data"))
+        .then(check(dto, acc -> ObjectUtils.isEmpty(acc.getCustomerType()), "Customer Type is required"))
+        .then(check(dto, acc -> ObjectUtils.isEmpty(acc.getCustomerId()), "Customer ID is required"))
+        .then(check(dto, acc -> ObjectUtils.isEmpty(acc.getMaintenanceFee()), "Maintenance fee is required"))
+        .then(check(dto, acc -> acc.getMaintenanceFee() <= 0, "Maintenance fee must be greater than or equal to zero"))
+        .then(check(dto, acc -> ObjectUtils.isEmpty(acc.getOpeningAmount()), "Opening amount is required"))
+        .then(check(dto, acc -> acc.getOpeningAmount() < minimumOpeningAmount, String.format("The minimum opening amount is %s", minimumOpeningAmount)))
+        .then(accountRepository.findByCustomerIdAndCustomerType(dto.getCustomerId(), dto.getCustomerType()).count()
             .<Long>handle((record, sink) -> {
-              if (record > 0 && account.getCustomerType() == CustomerType.PERSONAL) {
+              if (record > 0 && dto.getCustomerType() == CustomerType.PERSONAL) {
                 sink.error(new BankValidationException("Customer already has a current account"));
               } else {
                 sink.next(record);
@@ -52,8 +54,24 @@ public class AccountService {
             })
         )
         .flatMap(acc -> {
-            return accountRepository.save(account);
-         });
+          return accountRepository.save(dto.toAccount())
+              .flatMap(savedAccount -> {
+                return nextSequenceService.getNextSequence(TransactionSequences.class.getSimpleName())
+                    .map(nextSeq -> {
+                      var openingTransaction = new Transaction();
+                      openingTransaction.setAccountId(savedAccount.getId());
+                      openingTransaction.setAgent("-");
+                      openingTransaction.setAmount(dto.getOpeningAmount());
+                      openingTransaction.setDescription("Opening account");
+                      openingTransaction.setOperationNumber(nextSeq);
+                      openingTransaction.setRegisterDate(LocalDateTime.now());
+                      return openingTransaction;
+                    })
+                    .flatMap(tx -> {
+                      return transactionRepository.save(tx).map(tt -> savedAccount);
+                    });
+          });
+        });
   }
   
   private <T> Mono<Void> check(T customer, Predicate<T> predicate, String messageForException) {
@@ -83,15 +101,10 @@ public class AccountService {
             return Mono.error(new BankValidationException("Insuficient balance"));
           else {
             return nextSequenceService.getNextSequence(TransactionSequences.class.getSimpleName()).<Transaction>flatMap(nextSeq -> {
-              try {
-                var transaction = objectMapper.readValue(objectMapper.writeValueAsString(createTransactionDTO), Transaction.class);
+                var transaction = mapper.map(createTransactionDTO, Transaction.class);
                 transaction.setOperationNumber(nextSeq);
                 transaction.setRegisterDate(LocalDateTime.now());
                 return transactionRepository.save(transaction);
-              } catch (Exception ex) {
-                logger.error("Error en mapper", ex);
-                return Mono.error(ex);
-              }
             });
             
           }

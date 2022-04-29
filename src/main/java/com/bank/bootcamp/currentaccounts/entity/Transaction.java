@@ -17,6 +17,5 @@ public class Transaction {
   private String agent;
   private String description;
   private Double amount;
-  private Boolean createByMaintenanceFee;
   
 }

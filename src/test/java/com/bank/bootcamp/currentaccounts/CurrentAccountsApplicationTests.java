@@ -9,6 +9,9 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
+import org.modelmapper.ModelMapper;
+import org.springframework.core.env.Environment;
+import com.bank.bootcamp.currentaccounts.dto.CreateAccountDTO;
 import com.bank.bootcamp.currentaccounts.dto.CreateTransactionDTO;
 import com.bank.bootcamp.currentaccounts.entity.Account;
 import com.bank.bootcamp.currentaccounts.entity.CustomerType;
@@ -18,7 +21,6 @@ import com.bank.bootcamp.currentaccounts.repository.AccountRepository;
 import com.bank.bootcamp.currentaccounts.repository.TransactionRepository;
 import com.bank.bootcamp.currentaccounts.service.AccountService;
 import com.bank.bootcamp.currentaccounts.service.NextSequenceService;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
@@ -29,14 +31,16 @@ public class CurrentAccountsApplicationTests {
   private static AccountRepository accountRepository;
   private static TransactionRepository transactionRepository;
   private static NextSequenceService nextSequenceService;
-  private ObjectMapper mapper = new ObjectMapper();
+  private static Environment env;
+  private ModelMapper mapper = new ModelMapper();
   
   @BeforeAll
   public static void setup() {
     accountRepository = mock(AccountRepository.class);
     transactionRepository = mock(TransactionRepository.class);
     nextSequenceService = mock(NextSequenceService.class);
-    accountService = new AccountService(accountRepository, transactionRepository, nextSequenceService);
+    env = mock(Environment.class);
+    accountService = new AccountService(accountRepository, transactionRepository, nextSequenceService, env);
   }
   
   private Account getPersonalAccount() {
@@ -59,26 +63,29 @@ public class CurrentAccountsApplicationTests {
   public void createTwoPersonalAccountWithAllData() throws Exception {
     
     var personalAccount = getPersonalAccount();
+    var personalAccountDTO = mapper.map(personalAccount, CreateAccountDTO.class);
+    personalAccountDTO.setOpeningAmount(100d);
     
-    var savedPersonalAccount = mapper.readValue(mapper.writeValueAsString(personalAccount), Account.class);
+    var savedPersonalAccount = mapper.map(personalAccount, Account.class);
     savedPersonalAccount.setId(UUID.randomUUID().toString());
     
     when(accountRepository.findByCustomerIdAndCustomerType(personalAccount.getCustomerId(), personalAccount.getCustomerType())).thenReturn(Flux.empty());
-    when(accountRepository.save(personalAccount)).thenReturn(Mono.just(savedPersonalAccount));
+    when(accountRepository.save(Mockito.any(Account.class))).thenReturn(Mono.just(savedPersonalAccount));
     
-    var mono = accountService.createAccount(personalAccount);
+    var mono = accountService.createAccount(personalAccountDTO);
     StepVerifier.create(mono).assertNext(acc -> {
       assertThat(acc.getId()).isNotNull();
     }).verifyComplete();
     
     var personalAccount2 = getPersonalAccount();
-    var savedPersonalAccount2 = mapper.readValue(mapper.writeValueAsString(personalAccount2), Account.class);
+    var personalAccount2DTO = mapper.map(personalAccount2, CreateAccountDTO.class);
+    var savedPersonalAccount2 = mapper.map(personalAccount2, Account.class);
     savedPersonalAccount2.setId(UUID.randomUUID().toString());
     
     when(accountRepository.findByCustomerIdAndCustomerType(personalAccount2.getCustomerId(), personalAccount2.getCustomerType())).thenReturn(Flux.just(savedPersonalAccount2));
-    when(accountRepository.save(personalAccount2)).thenReturn(Mono.just(savedPersonalAccount2));
+    when(accountRepository.save(Mockito.any(Account.class))).thenReturn(Mono.just(savedPersonalAccount2));
     
-    var mono2 = accountService.createAccount(personalAccount2);
+    var mono2 = accountService.createAccount(personalAccount2DTO);
     StepVerifier.create(mono2)
       .expectError(BankValidationException.class)
       .verify();
@@ -89,26 +96,31 @@ public class CurrentAccountsApplicationTests {
   public void createTwoBusinessAccountWithAllData() throws Exception {
     
     var businessAccount = getBusinessAccount();
+    var businessAccountDTO = mapper.map(businessAccount, CreateAccountDTO.class);
+    businessAccountDTO.setOpeningAmount(100d);
     
-    var savedBusinessAccount = mapper.readValue(mapper.writeValueAsString(businessAccount), Account.class);
+    var savedBusinessAccount = mapper.map(businessAccount, Account.class);
     savedBusinessAccount.setId(UUID.randomUUID().toString());
     
     when(accountRepository.findByCustomerIdAndCustomerType(businessAccount.getCustomerId(), businessAccount.getCustomerType())).thenReturn(Flux.empty());
-    when(accountRepository.save(businessAccount)).thenReturn(Mono.just(savedBusinessAccount));
+    when(accountRepository.save(Mockito.any(Account.class))).thenReturn(Mono.just(savedBusinessAccount));
     
-    var mono = accountService.createAccount(businessAccount);
+    var mono = accountService.createAccount(businessAccountDTO);
     StepVerifier.create(mono).assertNext(acc -> {
       assertThat(acc.getId()).isNotNull();
     }).verifyComplete();
     
     var businessAccount2 = getBusinessAccount();
-    var savedBusinessAccount2 = mapper.readValue(mapper.writeValueAsString(businessAccount2), Account.class);
+    var businessAccount2DTO = mapper.map(businessAccount2, CreateAccountDTO.class);
+    businessAccount2DTO.setOpeningAmount(100d);
+    
+    var savedBusinessAccount2 = mapper.map(businessAccount2, Account.class);
     savedBusinessAccount2.setId(UUID.randomUUID().toString());
     
     when(accountRepository.findByCustomerIdAndCustomerType(businessAccount2.getCustomerId(), businessAccount2.getCustomerType())).thenReturn(Flux.just(savedBusinessAccount));
-    when(accountRepository.save(businessAccount2)).thenReturn(Mono.just(savedBusinessAccount2));
+    when(accountRepository.save(Mockito.any(Account.class))).thenReturn(Mono.just(savedBusinessAccount2));
     
-    var mono2 = accountService.createAccount(businessAccount2);
+    var mono2 = accountService.createAccount(businessAccount2DTO);
     StepVerifier.create(mono2).assertNext(acc -> {
       assertThat(acc.getId()).isNotNull();
     }).verifyComplete();
@@ -129,7 +141,7 @@ public class CurrentAccountsApplicationTests {
     createTransactionDTO.setAccountId(accountId);
     createTransactionDTO.setDescription("Deposito cajero");
     
-    var transactionSaved = mapper.readValue(mapper.writeValueAsString(createTransactionDTO), Transaction.class);
+    var transactionSaved = mapper.map(createTransactionDTO, Transaction.class);
     transactionSaved.setId(UUID.randomUUID().toString());
     transactionSaved.setOperationNumber(1);
     transactionSaved.setRegisterDate(LocalDateTime.now());
@@ -155,7 +167,7 @@ public class CurrentAccountsApplicationTests {
     createTransactionDTO.setAccountId(accountId);
     createTransactionDTO.setDescription("Deposito cajero");
     
-    var transactionSaved = mapper.readValue(mapper.writeValueAsString(createTransactionDTO), Transaction.class);
+    var transactionSaved = mapper.map(createTransactionDTO, Transaction.class);
     transactionSaved.setId(UUID.randomUUID().toString());
     transactionSaved.setOperationNumber(1);
     transactionSaved.setRegisterDate(LocalDateTime.now());
@@ -178,7 +190,7 @@ public class CurrentAccountsApplicationTests {
     createTransactionDTO.setAccountId(accountId);
     createTransactionDTO.setDescription("Deposito cajero");
     
-    var transactionSaved = mapper.readValue(mapper.writeValueAsString(createTransactionDTO), Transaction.class);
+    var transactionSaved = mapper.map(createTransactionDTO, Transaction.class);
     transactionSaved.setId(UUID.randomUUID().toString());
     transactionSaved.setOperationNumber(1);
     transactionSaved.setRegisterDate(LocalDateTime.now());
