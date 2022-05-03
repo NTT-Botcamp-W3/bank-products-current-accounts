@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.bank.bootcamp.currentaccounts.dto.BalanceDTO;
 import com.bank.bootcamp.currentaccounts.dto.CreateAccountDTO;
 import com.bank.bootcamp.currentaccounts.dto.CreateTransactionDTO;
+import com.bank.bootcamp.currentaccounts.dto.TransferDTO;
 import com.bank.bootcamp.currentaccounts.entity.Account;
 import com.bank.bootcamp.currentaccounts.entity.CustomerType;
 import com.bank.bootcamp.currentaccounts.entity.Transaction;
@@ -43,6 +44,11 @@ public class AccountController {
   @PostMapping("/transaction")
   public Mono<Integer> createTransaction(@RequestBody CreateTransactionDTO dto) {
     return accountService.createTransaction(dto).map(Transaction::getOperationNumber);
+  }
+  
+  @PostMapping("/transfer")
+  public Mono<Integer> transfer(@RequestBody TransferDTO dto) {
+    return accountService.transfer(dto);
   }
   
   @GetMapping("/byCustomer/{customerType}/{customerId}")

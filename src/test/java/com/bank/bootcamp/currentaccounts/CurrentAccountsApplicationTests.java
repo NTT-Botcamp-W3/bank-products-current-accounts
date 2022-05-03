@@ -11,9 +11,11 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.modelmapper.ModelMapper;
 import org.springframework.core.env.Environment;
+import com.bank.bootcamp.currentaccounts.dto.AccountType;
 import com.bank.bootcamp.currentaccounts.dto.BalanceDTO;
 import com.bank.bootcamp.currentaccounts.dto.CreateAccountDTO;
 import com.bank.bootcamp.currentaccounts.dto.CreateTransactionDTO;
+import com.bank.bootcamp.currentaccounts.dto.TransferDTO;
 import com.bank.bootcamp.currentaccounts.entity.Account;
 import com.bank.bootcamp.currentaccounts.entity.CustomerType;
 import com.bank.bootcamp.currentaccounts.entity.Transaction;
@@ -22,6 +24,7 @@ import com.bank.bootcamp.currentaccounts.repository.AccountRepository;
 import com.bank.bootcamp.currentaccounts.repository.TransactionRepository;
 import com.bank.bootcamp.currentaccounts.service.AccountService;
 import com.bank.bootcamp.currentaccounts.service.NextSequenceService;
+import com.bank.bootcamp.currentaccounts.webclient.AccountWebClient;
 import com.bank.bootcamp.currentaccounts.webclient.CreditWebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -36,6 +39,7 @@ public class CurrentAccountsApplicationTests {
   private static Environment env;
   private ModelMapper mapper = new ModelMapper();
   private static CreditWebClient creditWebClient;
+  private static AccountWebClient accountWebClient;
   
   @BeforeAll
   public static void setup() {
@@ -44,7 +48,8 @@ public class CurrentAccountsApplicationTests {
     nextSequenceService = mock(NextSequenceService.class);
     env = mock(Environment.class);
     creditWebClient = mock(CreditWebClient.class);
-    accountService = new AccountService(accountRepository, transactionRepository, nextSequenceService, env, creditWebClient);
+    accountWebClient = mock(AccountWebClient.class);
+    accountService = new AccountService(accountRepository, transactionRepository, nextSequenceService, env, creditWebClient, accountWebClient);
   }
   
   private Account getPersonalAccount() {
@@ -281,5 +286,38 @@ public class CurrentAccountsApplicationTests {
     }).verifyComplete();
   }
   
-
+  @Test
+  public void transfer() {
+    var transferDTO = new TransferDTO();
+    transferDTO.setAmount(100d);
+    transferDTO.setSourceAccountId("CA-001");
+    transferDTO.setTargetAccountType(AccountType.SAVING);
+    transferDTO.setTargetAccountId("SA-001");
+    var amount = 100d;
+    //  /transfer
+    when(nextSequenceService.getNextSequence("TransactionSequences")).thenReturn(Mono.just(1));
+    when(transactionRepository.getBalanceByAccountId(transferDTO.getSourceAccountId())).thenReturn(Mono.just(amount));
+    when(accountRepository.findById(transferDTO.getSourceAccountId())).thenReturn(Mono.just(new Account()));
+    
+    var existentTransaction = new Transaction();
+    existentTransaction.setAmount(100d);
+    
+    when(transactionRepository.findByAccountIdAndRegisterDateBetween(Mockito.anyString(), Mockito.any(LocalDateTime.class), Mockito.any(LocalDateTime.class))).thenReturn(Flux.just(existentTransaction));
+    
+    var tx = new Transaction();
+    tx.setAccountId(transferDTO.getSourceAccountId());
+    tx.setAgent("-");
+    tx.setOperationNumber(1);
+    tx.setAmount(amount);
+    tx.setId(UUID.randomUUID().toString());
+    tx.setRegisterDate(LocalDateTime.now());
+    
+    when(transactionRepository.save(Mockito.any(Transaction.class))).thenReturn(Mono.just(tx));
+    when(accountWebClient.createTransaction(Mockito.any(AccountType.class), Mockito.any(CreateTransactionDTO.class))).thenReturn(Mono.just(4));
+    var mono = accountService.transfer(transferDTO);
+    StepVerifier.create(mono).assertNext(operationNumber -> {
+      assertThat(operationNumber).isNotNull();
+    }).verifyComplete();
+  }
+  
 }

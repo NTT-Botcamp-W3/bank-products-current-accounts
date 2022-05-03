@@ -10,5 +10,6 @@ public class CreateTransactionDTO {
   private String description;
   private Double amount;
   private Boolean createByMaintenanceFee = Boolean.FALSE;
+  private Boolean createByComission = Boolean.FALSE;
   
 }
