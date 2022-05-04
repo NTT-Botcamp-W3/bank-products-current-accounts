@@ -69,6 +69,15 @@ public class AccountService {
                   .map(count -> register))
               // Si llega a caer aquí quiere decir que no es PYME y no hay errores
               .switchIfEmpty(Mono.just(dto))
+              .flatMap(x -> {
+                return creditWebClient.hasOverdueDebt(x.getCustomerId(), x.getCustomerType())
+                    .<CreateAccountDTO>handle((tieneDeuda, sink) -> {
+                      if (tieneDeuda) 
+                        sink.error(new BankValidationException("No puede generar este producto por deuda vencida"));
+                      else 
+                        sink.next(x);
+                    });
+              })
               .flatMap(register -> {
                 return accountRepository.save(register.toAccount()).flatMap(savedAccount -> {
                   return nextSequenceService.getNextSequence(TransactionSequences.class.getSimpleName())

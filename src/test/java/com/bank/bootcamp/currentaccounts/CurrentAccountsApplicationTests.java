@@ -113,6 +113,7 @@ public class CurrentAccountsApplicationTests {
     
     when(accountRepository.findByCustomerIdAndCustomerType(businessAccount.getCustomerId(), businessAccount.getCustomerType())).thenReturn(Flux.empty());
     when(accountRepository.save(Mockito.any(Account.class))).thenReturn(Mono.just(savedBusinessAccount));
+    when(creditWebClient.hasOverdueDebt(Mockito.anyString(), Mockito.any(CustomerType.class))).thenReturn(Mono.just(Boolean.FALSE));
     
     var mono = accountService.createAccount(businessAccountDTO);
     StepVerifier.create(mono).assertNext(acc -> {
@@ -151,6 +152,7 @@ public class CurrentAccountsApplicationTests {
     when(accountRepository.findByCustomerIdAndCustomerType(businessAccount.getCustomerId(), businessAccount.getCustomerType())).thenReturn(Flux.empty());
     when(accountRepository.save(Mockito.any(Account.class))).thenReturn(Mono.just(savedBusinessAccount));
     when(creditWebClient.getAllBalances(businessAccount.getCustomerId())).thenReturn(Flux.just(new BalanceDTO()));
+    when(creditWebClient.hasOverdueDebt(Mockito.anyString(), Mockito.any(CustomerType.class))).thenReturn(Mono.just(Boolean.FALSE));
     
     var mono = accountService.createAccount(businessAccountDTO);
     StepVerifier.create(mono).assertNext(acc -> {
@@ -318,6 +320,59 @@ public class CurrentAccountsApplicationTests {
     StepVerifier.create(mono).assertNext(operationNumber -> {
       assertThat(operationNumber).isNotNull();
     }).verifyComplete();
+  }
+  
+  @Test
+  public void clienteSiPuedeAdquirirProducto() {
+    //Un cliente no podrá adquirir un producto si posee alguna deuda vencida en algún producto de crédito.
+    
+    var personalAccount = getPersonalAccount();
+    var personalAccountDTO = mapper.map(personalAccount, CreateAccountDTO.class);
+    personalAccountDTO.setOpeningAmount(100d);
+    
+    var savedPersonalAccount = mapper.map(personalAccount, Account.class);
+    savedPersonalAccount.setId(UUID.randomUUID().toString());
+    
+    when(accountRepository.findByCustomerIdAndCustomerType(personalAccount.getCustomerId(), personalAccount.getCustomerType())).thenReturn(Flux.empty());
+    when(accountRepository.save(Mockito.any(Account.class))).thenReturn(Mono.just(savedPersonalAccount));
+    when(creditWebClient.hasOverdueDebt(personalAccount.getCustomerId(), personalAccount.getCustomerType())).thenReturn(Mono.just(Boolean.FALSE));
+    when(nextSequenceService.getNextSequence(Mockito.anyString())).thenReturn(Mono.just(1));
+    var transaction = new Transaction();
+    transaction.setAccountId(personalAccount.getId());
+    when(transactionRepository.save(Mockito.any(Transaction.class))).thenReturn(Mono.just(transaction));
+    
+    var mono = accountService.createAccount(personalAccountDTO);
+    StepVerifier.create(mono).assertNext(acc -> {
+      assertThat(acc.getId()).isNotNull();
+    }).verifyComplete();
+
+    
+  }
+  
+  
+  @Test
+  public void clienteNoPuedeAdquirirProducto() {
+    //Un cliente no podrá adquirir un producto si posee alguna deuda vencida en algún producto de crédito.
+    
+    var personalAccount = getPersonalAccount();
+    var personalAccountDTO = mapper.map(personalAccount, CreateAccountDTO.class);
+    personalAccountDTO.setOpeningAmount(100d);
+    
+    var savedPersonalAccount = mapper.map(personalAccount, Account.class);
+    savedPersonalAccount.setId(UUID.randomUUID().toString());
+    
+    when(accountRepository.findByCustomerIdAndCustomerType(personalAccount.getCustomerId(), personalAccount.getCustomerType())).thenReturn(Flux.empty());
+    when(accountRepository.save(Mockito.any(Account.class))).thenReturn(Mono.just(savedPersonalAccount));
+    when(creditWebClient.hasOverdueDebt(personalAccount.getCustomerId(), personalAccount.getCustomerType())).thenReturn(Mono.just(Boolean.TRUE));
+    when(nextSequenceService.getNextSequence(Mockito.anyString())).thenReturn(Mono.just(1));
+    var transaction = new Transaction();
+    transaction.setAccountId(personalAccount.getId());
+    when(transactionRepository.save(Mockito.any(Transaction.class))).thenReturn(Mono.just(transaction));
+    
+    var mono = accountService.createAccount(personalAccountDTO);
+    StepVerifier.create(mono).expectError().verify();
+
+    
   }
   
 }
